@@ -350,14 +350,6 @@ def generate(model: LLaDAModelLM, prompt, steps=128, gen_length=128, block_lengt
                 x0_p = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)
             else:
                 raise NotImplementedError(remasking)
-            
-            # save decoding details
-            # tokens = x0.reshape(-1)[-gen_length:].tolist()
-            # confs = x0_p.reshape(-1)[-gen_length:].tolist()
-            # masks = mask_index.reshape(-1)[-gen_length:].tolist()
-            # tokens_list.append(tokens)
-            # confidences_list.append(confs)
-            # masks_list.append(masks)
 
             x0_p[:, prompt.shape[1] + (num_block + 1) * block_length:] = -np.inf
 
@@ -369,8 +361,6 @@ def generate(model: LLaDAModelLM, prompt, steps=128, gen_length=128, block_lengt
                 _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, i])
                 transfer_index[j, select_index] = True
             x[transfer_index] = x0[transfer_index]
-            # index = transfer_index.reshape(-1)[-gen_length:].tolist()
-            # index_list.append(index)
 
     return x
 
