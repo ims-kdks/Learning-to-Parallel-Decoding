@@ -14,6 +14,10 @@ pip install -r requirements.txt
    ```
    ./eval_llada.sh
    ```
+## Generate data for training
+```
+./generate_training_data.sh
+```
 
 ## Acknowledgments
 This project uses code from:
