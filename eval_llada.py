@@ -274,12 +274,12 @@ class LLaDAEvalHarness(LM):
         start_time = time.perf_counter()
         for req in tqdm(requests, desc="Generating..."):
             question = req.args[0]
-            if self.is_instruct:
-                m = [{"role": "user", "content": question}]
-                user_input = self.tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
+            if (not self.is_instruct) or ('task_id' in req.doc and str(req.doc['task_id']).lower().startswith('humaneval')):
+                user_input = question
                 input_ids = self.tokenizer(user_input)['input_ids']
             else:
-                user_input = question
+                m = [{"role": "user", "content": question}]
+                user_input = self.tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
                 input_ids = self.tokenizer(user_input)['input_ids']
 
             stop_tokens = req.args[1]['until']
@@ -298,19 +298,15 @@ class LLaDAEvalHarness(LM):
             elif self.method == "L2P+EoT+prefix_cache":
                 generated_answer = generate_with_prefix_cache(self.model, self.small_model, self.accept_thres, input_ids, steps=self.steps, gen_length=self.gen_length, block_length=self.block_length, temperature=0, remasking=self.remasking)
 
-            if self.is_instruct and 'task_id' in req.doc and str(req.doc['task_id']).lower().startswith('humaneval'):
-                num_tokens += (generated_answer != 126081).sum()
-                generated_answer = self.tokenizer.decode(generated_answer[0][input_ids.shape[1]:], skip_special_tokens=True)
-            else:
-                generated_answer = self.tokenizer.decode(generated_answer[0][input_ids.shape[1]:], skip_special_tokens=False)
-                for stop_seq in stop_tokens:
-                    if stop_seq in generated_answer:
-                        generated_answer = generated_answer.split(stop_seq)[0]
+            generated_answer = self.tokenizer.decode(generated_answer[0][input_ids.shape[1]:], skip_special_tokens=False)
+            for stop_seq in stop_tokens:
+                if stop_seq in generated_answer:
+                    generated_answer = generated_answer.split(stop_seq)[0]
 
-                # remove special tokens
-                generated_answer_ids = torch.tensor(self.tokenizer(generated_answer)["input_ids"])
-                num_tokens += (generated_answer_ids != 126081).sum()
-                generated_answer = self.tokenizer.decode(generated_answer_ids, skip_special_tokens=True)
+            # remove special tokens
+            generated_answer_ids = torch.tensor(self.tokenizer(generated_answer)["input_ids"])
+            num_tokens += (generated_answer_ids != 126081).sum()
+            generated_answer = self.tokenizer.decode(generated_answer_ids, skip_special_tokens=True)
             out.append(generated_answer)
 
             # self.accelerator.wait_for_everyone()
