@@ -11,7 +11,7 @@ import argparse
 import pickle
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--num_sample", type=int, required=False)
+parser.add_argument("--num_sample", type=int, required=False, help="Number of samples to be selected from each task")
 parser.add_argument("--steps", type=int, required=True)
 parser.add_argument("--gen_length", type=int, required=True)
 parser.add_argument("--block_length", type=int, required=True)
@@ -153,6 +153,7 @@ ds = ds.map(_tokenize).with_format('torch', device=device)
 # generate data for training
 for i, elem in enumerate(tqdm(ds)):
     prompt = elem['question'].unsqueeze(0).to(device)
+    # get the correct answer first
     correct_answer = generate_data(model, prompt, steps=args.steps, gen_length=args.gen_length, block_length=args.block_length, temperature=0, cfg_scale=0, remasking='low_confidence')
 
     _ = generate_data(model, prompt, steps=args.steps, gen_length=args.gen_length, block_length=args.block_length, temperature=0, cfg_scale=0, remasking='low_confidence', correct_answer=correct_answer, id=f'{accelerator.process_index}-{i}')
