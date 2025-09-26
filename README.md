@@ -19,7 +19,8 @@ pip install -r requirements.txt
 ./generate_training_data.sh
 ```
 
+## Training Filter
+You can directly use `training.ipynb` to train new filter models with your own datasets.
+
 ## Acknowledgments
-This project uses code from:
-- [LLaDA](https://github.com/ML-GSAI/LLaDA)
-- [Fast-dLLM](https://github.com/NVlabs/Fast-dLLM)
+We would like to thank the authors of [LLaDA](https://github.com/llada-project/llada) and [Fast-dLLM](https://github.com/NVlabs/Fast-dLLM) for their excellent work and open-source contributions. 
