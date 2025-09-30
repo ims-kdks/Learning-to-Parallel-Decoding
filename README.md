@@ -1,5 +1,7 @@
 # Learning to Parallel Decoding
 
+[![arXiv](https://img.shields.io/badge/Paper-arXiv-red?logo=arxiv)](https://arxiv.org/abs/2509.25188) [![arXiv](https://img.shields.io/badge/Project%20Page-red)](https://ims-kdks.github.io/learning-to-parallel/)
+
 <img width="1806" height="373" alt="introduction" src="https://github.com/user-attachments/assets/87b9994a-dc69-42e6-a5f8-6e8276b98883" />
 
 https://github.com/user-attachments/assets/09c67a58-b425-463d-a998-c1a6049bc171
