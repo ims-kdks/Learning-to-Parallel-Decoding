@@ -1,5 +1,9 @@
 # Learning to Parallel Decoding
 
+
+https://github.com/user-attachments/assets/09c67a58-b425-463d-a998-c1a6049bc171
+
+
 ## How to run
 1. Install dependencies
 ```
