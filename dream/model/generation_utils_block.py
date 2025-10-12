@@ -445,7 +445,15 @@ class DreamGenerationMixin:
             
             current_block_start = input_ids.shape[1] + num_block * block_length
             current_block_end = current_block_start + block_length
-
+            
+            index_of_interest = torch.full([x.shape[-1]], False, dtype=torch.bool, device=x.device)
+            if "dual_cache" in method:
+                index_of_interest = slice(current_block_start, current_block_end)
+            elif "prefix_cache" in method:
+                index_of_interest = slice(current_block_start, None)
+            else:
+                index_of_interest = slice(None)
+            
             # update cache
             if "cache" in method:
                 model_output = self(x, attention_mask, tok_idx, use_cache=True)
@@ -470,16 +478,16 @@ class DreamGenerationMixin:
             i = 1
             while True:
                 # Use cache for generation
+                mask_index = torch.zeros_like(x, dtype=torch.bool)
+                mask_index = (x[:, index_of_interest] == mask_token_id)
+                
                 if "dual_cache" in method:
-                    mask_index = (x[:, current_block_start:current_block_end] == mask_token_id)
                     mask_index[:, block_length:] = False
                     full_mask_index = (x[:, current_block_start:] == mask_token_id)
                 elif "prefix_cache" in method:
-                    mask_index = (x[:, current_block_start:] == mask_token_id)
                     mask_index[:, block_length:] = False
                     full_mask_index = (x[:, current_block_start:] == mask_token_id)
                 else:
-                    mask_index = (x == mask_token_id)
                     mask_index[:, current_block_end:] = False
                     full_mask_index = (x == mask_token_id)
                 
@@ -490,16 +498,14 @@ class DreamGenerationMixin:
                 else:
                     current_attention_mask = attention_mask
                 
-                if "dual_cache" in method:
-                    model_output = self(x[:, current_block_start:current_block_end], current_attention_mask, 
-                                    tok_idx[:, current_block_start:current_block_end] if tok_idx is not None else None, 
-                                    past_key_values=past_key_values, use_cache=True, dual_cache=True, replace_position=replace_position)
-                elif "prefix_cache" in method:
-                    model_output = self(x[:, current_block_start:], current_attention_mask, 
-                                    tok_idx[:, current_block_start:] if tok_idx is not None else None, 
-                                    past_key_values=past_key_values, use_cache=True)
-                else:
-                    model_output = self(x, attention_mask, tok_idx)
+                model_output = self(x[:, index_of_interest],
+                                    current_attention_mask, 
+                                    tok_idx[:, index_of_interest] if tok_idx is not None else None, 
+                                    past_key_values=past_key_values,
+                                    use_cache=("cache" in method),
+                                    dual_cache=("dual_cache" in method),
+                                    replace_position=replace_position if "dual_cache" in method else None
+                                    )
                 logits = model_output.logits
                 logits = torch.cat([logits[:,:1], logits[:, :-1]], dim=1)
                 if i == steps_per_block:
@@ -509,19 +515,12 @@ class DreamGenerationMixin:
                 if "EoT" in method:
                     mask_logits = logits[full_mask_index]
                     confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
-                    # mask_index[:, block_length:] = False
                 else:
-                    # mask_index[:, block_length:] = False
                     mask_logits = logits[mask_index]
                     confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
                 num_mask_token = mask_index.sum() / mask_index.shape[0]
                 number_transfer_tokens = int(num_mask_token * (1 - s / t)) if i < steps_per_block - 1 else int(num_mask_token)
-                if "dual_cache" in method:
-                    full_confidence = torch.full_like(x[:, current_block_start:current_block_end], -torch.inf, device=self.device, dtype=logits.dtype)
-                elif "prefix_cache" in method:
-                    full_confidence = torch.full_like(x[:, current_block_start:], -torch.inf, device=self.device, dtype=logits.dtype)
-                else:
-                    full_confidence = torch.full_like(x, -torch.inf, device=self.device, dtype=logits.dtype)
+                full_confidence = torch.full_like(x[:, index_of_interest], -torch.inf, device=self.device, dtype=logits.dtype)
                 if "EoT" in method:
                     full_confidence[mask_index] = confidence[mask_index[full_mask_index]]
                 else:
@@ -535,23 +534,13 @@ class DreamGenerationMixin:
                         full_confidence = full_confidence / alg_temp
                         full_confidence = F.softmax(full_confidence, dim=-1)
                         transfer_index = torch.multinomial(full_confidence, num_samples=number_transfer_tokens)
-                    if "dual_cache" in method:
-                        x_ = torch.zeros_like(x[:, current_block_start:current_block_end], device=self.device, dtype=torch.long) + mask_token_id
-                    elif "prefix_cache" in method:
-                        x_ = torch.zeros_like(x[:, current_block_start:], device=self.device, dtype=torch.long) + mask_token_id
-                    else:
-                        x_ = torch.zeros_like(x, device=self.device, dtype=torch.long) + mask_token_id
+                    x_ = torch.zeros_like(x[:, index_of_interest], device=self.device, dtype=torch.long) + mask_token_id
                     if "EoT" in method:
                         x_[mask_index] = x0[mask_index[full_mask_index]]
                     else:
                         x_[mask_index] = x0.clone()
                     row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
-                    if "dual_cache" in method:
-                        x[:, current_block_start:current_block_end][row_indices,transfer_index] = x_[row_indices,transfer_index]
-                    elif "prefix_cache" in method:
-                        x[:, current_block_start:][row_indices,transfer_index] = x_[row_indices,transfer_index]
-                    else:
-                        x[row_indices,transfer_index] = x_[row_indices,transfer_index]
+                    x[:, index_of_interest][row_indices,transfer_index] = x_[row_indices,transfer_index]
                 
                 if "EoT" in method and (end_token_index := x0 == generation_config.eos_token_id).any():
                     # If the end token is present, we find its position and truncate the sequence.
