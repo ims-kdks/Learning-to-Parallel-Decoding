@@ -540,6 +540,8 @@ class DreamGenerationMixin:
                         position_of_end_token = torch.multinomial(end_token_conf, num_samples=1)
                     # print(f"Position of end token: {current_block_start + position_of_end_token + 1}")
                     x = x[:, :position_of_end_token + 1]
+                    if "dual_cache" in method:
+                        replace_position[:, position_of_end_token + 1:] = False
                 i += 1
 
                 if (x[:, current_block_start:current_block_end] == mask_token_id).sum() == 0:
