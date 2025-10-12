@@ -46,7 +46,7 @@ else:
 messages = []
 
 # Get user input
-user_input = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours? Short answer preferred"
+user_input = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?"
 
 # Add user message to conversation history
 messages.append({"role": "user", "content": user_input})
@@ -80,7 +80,7 @@ output = model.diffusion_generate(
     alg_temp=0.1,
     top_k=None,
     block_length=32,
-    # method="EoT"
+    method="prefix_cache"
     # generation_tokens_hook_func=generation_tokens_hook_func
 )
 print(f"Time spent: {time.time() - start}")
