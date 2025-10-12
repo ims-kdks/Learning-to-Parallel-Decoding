@@ -24,7 +24,7 @@ import types
 # Load model and tokenizer
 device = "cuda:3"
 # 从命令行读取use_cache
-use_cache = False
+use_cache = True
 
 if use_cache:
     model_path = "Dream-org/Dream-v0-Instruct-7B"
@@ -46,7 +46,7 @@ else:
 messages = []
 
 # Get user input
-user_input = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?"
+user_input = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours? Short answer preferred"
 
 # Add user message to conversation history
 messages.append({"role": "user", "content": user_input})
@@ -70,16 +70,17 @@ start = time.time()
 output = model.diffusion_generate(
     input_ids,
     attention_mask=attention_mask,
-    max_new_tokens=128,
+    max_new_tokens=1024,
     output_history=True,
     return_dict_in_generate=True,
-    steps=128,
+    steps=1024,
     temperature=0.,
     top_p=None,
     alg="entropy",
     alg_temp=0.1,
     top_k=None,
     block_length=32,
+    # method="EoT"
     # generation_tokens_hook_func=generation_tokens_hook_func
 )
 print(f"Time spent: {time.time() - start}")

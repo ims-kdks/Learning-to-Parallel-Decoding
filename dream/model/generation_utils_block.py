@@ -370,17 +370,17 @@ class DreamGenerationMixin:
             input_ids=input_ids,
             attention_mask=attention_mask 
         )
-        threshold = kwargs.get("threshold", 0.9)
         block_length = kwargs.get("block_length", 32)
         dual_cache = kwargs.get("dual_cache", False)
+        method = kwargs.get("method", "original")
 
         result = self._sample(
             input_ids,
             attention_mask=attention_mask,
             generation_config=generation_config,
-            threshold=threshold,
             block_length=block_length,
-            dual_cache=dual_cache
+            dual_cache=dual_cache,
+            method=method
         )
         return result
 
@@ -389,9 +389,9 @@ class DreamGenerationMixin:
         input_ids: torch.LongTensor,
         attention_mask: Optional[torch.LongTensor],
         generation_config: DreamGenerationConfig,
-        threshold: Optional[float] = 0.9,
         block_length: Optional[int] = 32,
         dual_cache: bool = False,
+        method: str = "original"
     ) -> Union[DreamModelOutput, torch.LongTensor]:
         # init values
         
@@ -443,6 +443,8 @@ class DreamGenerationMixin:
 
         # Process each block
         for num_block in range(num_blocks):
+            if (x == mask_token_id).sum() == 0:
+                break
             
             current_block_start = input_ids.shape[1] + num_block * block_length
             current_block_end = current_block_start + block_length
@@ -474,6 +476,7 @@ class DreamGenerationMixin:
                     mask_index = (x[:, current_block_start:current_block_end] == mask_token_id)
                 else:
                     mask_index = (x[:, current_block_start:] == mask_token_id)
+                full_mask_index = (x[:, current_block_start:] == mask_token_id)
                 
                 # Prepare attention mask for cached generation
                 if attention_mask != "full":
@@ -492,71 +495,65 @@ class DreamGenerationMixin:
                                     past_key_values=past_key_values, use_cache=True)
                 logits = model_output.logits
                 logits = torch.cat([logits[:,:1], logits[:, :-1]], dim=1)
-                if alg == 'confidence_threshold':
-                    mask_logits = logits[mask_index]
-                
-                    confidence, x0 = sample_tokens(mask_logits, temperature=temperature, top_p=top_p, top_k=top_k)
-                    
-                    if dual_cache:
-                        x_ = torch.zeros_like(x[:, current_block_start:current_block_end], device=self.device, dtype=torch.long) + mask_token_id
-                        full_confidence = torch.full_like(x[:, current_block_start:current_block_end], -torch.inf, device=self.device, dtype=logits.dtype)
-                    else:
-                        x_ = torch.zeros_like(x[:, current_block_start:], device=self.device, dtype=torch.long) + mask_token_id
-                        full_confidence = torch.full_like(x[:, current_block_start:], -torch.inf, device=self.device, dtype=logits.dtype)
-                    
-                    x_[mask_index] = x0.clone()
-                    full_confidence[mask_index] = confidence
-                    full_confidence[:, block_length:] = -torch.inf
-                    
-                    current_transfer_tokens = (x[:, current_block_start:current_block_end] == mask_token_id).sum()
-                    
-                    selected_confidence, select_index = torch.topk(full_confidence, current_transfer_tokens)
-                    transfer_index = torch.zeros_like(x_, device=x.device, dtype=torch.bool)
-                    
-                    select_index = select_index.to(x.device)
-                    transfer_index[0, select_index[0]] = True
-                    for k in range(1, current_transfer_tokens):
-                        if selected_confidence[0, k] < threshold:
-                            transfer_index[0, select_index[0, k]] = False
-                    if dual_cache:
-                        x[:, current_block_start:current_block_end][transfer_index] = x_[transfer_index]
-                    else:
-                        x[:, current_block_start:][transfer_index] = x_[transfer_index]
+                if i == steps_per_block:
+                    break
+                t = timesteps[i]
+                s = timesteps[i + 1]
+                if "EoT" in method:
+                    mask_logits = logits[full_mask_index]
+                    confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
+                    mask_index[:, block_length:] = False
                 else:
-                    if i == steps_per_block:
-                        break
-                    t = timesteps[i]
-                    s = timesteps[i + 1]
                     mask_index[:, block_length:] = False
                     mask_logits = logits[mask_index]
                     confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
-                    num_mask_token = mask_index.sum() / mask_index.shape[0]
-                    number_transfer_tokens = int(num_mask_token * (1 - s / t)) if i < steps_per_block - 1 else int(num_mask_token)
-                    if dual_cache:
-                        full_confidence = torch.full_like(x[:, current_block_start:current_block_end], -torch.inf, device=self.device, dtype=logits.dtype)
-                    else:
-                        full_confidence = torch.full_like(x[:, current_block_start:], -torch.inf, device=self.device, dtype=logits.dtype)
+                num_mask_token = mask_index.sum() / mask_index.shape[0]
+                number_transfer_tokens = int(num_mask_token * (1 - s / t)) if i < steps_per_block - 1 else int(num_mask_token)
+                if dual_cache:
+                    full_confidence = torch.full_like(x[:, current_block_start:current_block_end], -torch.inf, device=self.device, dtype=logits.dtype)
+                else:
+                    full_confidence = torch.full_like(x[:, current_block_start:], -torch.inf, device=self.device, dtype=logits.dtype)
+                if "EoT" in method:
+                    full_confidence[mask_index] = confidence[mask_index[full_mask_index]]
+                else:
                     full_confidence[mask_index] = confidence
-                    full_confidence[:, block_length:] = -torch.inf
-                    
-                    if number_transfer_tokens > 0:
-                        if alg_temp is None or alg_temp == 0:
-                            _, transfer_index = torch.topk(full_confidence, number_transfer_tokens)
-                        else:
-                            full_confidence = full_confidence / alg_temp
-                            full_confidence = F.softmax(full_confidence, dim=-1)
-                            transfer_index = torch.multinomial(full_confidence, num_samples=number_transfer_tokens)
-                        if dual_cache:
-                            x_ = torch.zeros_like(x[:, current_block_start:current_block_end], device=self.device, dtype=torch.long) + mask_token_id
-                        else:
-                            x_ = torch.zeros_like(x[:, current_block_start:], device=self.device, dtype=torch.long) + mask_token_id
+                full_confidence[:, block_length:] = -torch.inf
+                
+                if number_transfer_tokens > 0:
+                    if alg_temp is None or alg_temp == 0:
+                        _, transfer_index = torch.topk(full_confidence, number_transfer_tokens)
+                    else:
+                        full_confidence = full_confidence / alg_temp
+                        full_confidence = F.softmax(full_confidence, dim=-1)
+                        transfer_index = torch.multinomial(full_confidence, num_samples=number_transfer_tokens)
+                    if dual_cache:
+                        x_ = torch.zeros_like(x[:, current_block_start:current_block_end], device=self.device, dtype=torch.long) + mask_token_id
+                    else:
+                        x_ = torch.zeros_like(x[:, current_block_start:], device=self.device, dtype=torch.long) + mask_token_id
+                    if "EoT" in method:
+                        x_[mask_index] = x0[mask_index[full_mask_index]]
+                    else:
                         x_[mask_index] = x0.clone()
-                        row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
-                        if dual_cache:
-                            x[:, current_block_start:current_block_end][row_indices,transfer_index] = x_[row_indices,transfer_index]
-                        else:
-                            x[:, current_block_start:][row_indices,transfer_index] = x_[row_indices,transfer_index]
-                    i += 1
+                    row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
+                    if dual_cache:
+                        x[:, current_block_start:current_block_end][row_indices,transfer_index] = x_[row_indices,transfer_index]
+                    else:
+                        x[:, current_block_start:][row_indices,transfer_index] = x_[row_indices,transfer_index]
+                
+                if "EoT" in method and (end_token_index := x0 == generation_config.eos_token_id).any():
+                    # If the end token is present, we find its position and truncate the sequence.
+                    # This is to ensure that the generation stops at the end token.
+                    end_token_conf = torch.full_like(x[:, current_block_start:], -torch.inf, device=self.device, dtype=confidence.dtype)
+                    end_token_conf[full_mask_index] = torch.where(end_token_index, confidence, -torch.inf)
+                    if alg_temp is None or alg_temp == 0:
+                        position_of_end_token = end_token_conf.argmax(dim=-1)
+                    else:
+                        end_token_conf = end_token_conf / alg_temp
+                        end_token_conf = F.softmax(end_token_conf, dim=-1)
+                        position_of_end_token = torch.multinomial(end_token_conf, num_samples=1)
+                    # print(f"Position of end token: {current_block_start + position_of_end_token + 1}")
+                    x = x[:, :current_block_start + position_of_end_token + 1]
+                i += 1
 
                 if (x[:, current_block_start:current_block_end] == mask_token_id).sum() == 0:
                     break
