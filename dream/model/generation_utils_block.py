@@ -478,18 +478,14 @@ class DreamGenerationMixin:
             i = 1
             while True:
                 # Use cache for generation
-                mask_index = torch.zeros_like(x, dtype=torch.bool)
                 mask_index = (x[:, index_of_interest] == mask_token_id)
                 
                 if "dual_cache" in method:
                     mask_index[:, block_length:] = False
-                    full_mask_index = (x[:, current_block_start:] == mask_token_id)
                 elif "prefix_cache" in method:
                     mask_index[:, block_length:] = False
-                    full_mask_index = (x[:, current_block_start:] == mask_token_id)
                 else:
                     mask_index[:, current_block_end:] = False
-                    full_mask_index = (x == mask_token_id)
                 
                 # Prepare attention mask for cached generation
                 if attention_mask != "full":
@@ -512,20 +508,12 @@ class DreamGenerationMixin:
                     break
                 t = timesteps[i]
                 s = timesteps[i + 1]
-                if "EoT" in method:
-                    mask_logits = logits[full_mask_index]
-                    confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
-                else:
-                    mask_logits = logits[mask_index]
-                    confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
+                mask_logits = logits[mask_index]
+                confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
                 num_mask_token = mask_index.sum() / mask_index.shape[0]
                 number_transfer_tokens = int(num_mask_token * (1 - s / t)) if i < steps_per_block - 1 else int(num_mask_token)
                 full_confidence = torch.full_like(x[:, index_of_interest], -torch.inf, device=self.device, dtype=logits.dtype)
-                if "EoT" in method:
-                    full_confidence[mask_index] = confidence[mask_index[full_mask_index]]
-                else:
-                    full_confidence[mask_index] = confidence
-                # full_confidence[:, block_length:] = -torch.inf
+                full_confidence[mask_index] = confidence
                 
                 if number_transfer_tokens > 0:
                     if alg_temp is None or alg_temp == 0:
@@ -535,18 +523,15 @@ class DreamGenerationMixin:
                         full_confidence = F.softmax(full_confidence, dim=-1)
                         transfer_index = torch.multinomial(full_confidence, num_samples=number_transfer_tokens)
                     x_ = torch.zeros_like(x[:, index_of_interest], device=self.device, dtype=torch.long) + mask_token_id
-                    if "EoT" in method:
-                        x_[mask_index] = x0[mask_index[full_mask_index]]
-                    else:
-                        x_[mask_index] = x0.clone()
+                    x_[mask_index] = x0.clone()
                     row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
                     x[:, index_of_interest][row_indices,transfer_index] = x_[row_indices,transfer_index]
                 
                 if "EoT" in method and (end_token_index := x0 == generation_config.eos_token_id).any():
                     # If the end token is present, we find its position and truncate the sequence.
                     # This is to ensure that the generation stops at the end token.
-                    end_token_conf = torch.full_like(x[:, current_block_start:], -torch.inf, device=self.device, dtype=confidence.dtype)
-                    end_token_conf[full_mask_index] = torch.where(end_token_index, confidence, -torch.inf)
+                    end_token_conf = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
+                    end_token_conf[:, index_of_interest][mask_index] = torch.where(end_token_index, confidence, -torch.inf)
                     if alg_temp is None or alg_temp == 0:
                         position_of_end_token = end_token_conf.argmax(dim=-1)
                     else:
@@ -554,7 +539,7 @@ class DreamGenerationMixin:
                         end_token_conf = F.softmax(end_token_conf, dim=-1)
                         position_of_end_token = torch.multinomial(end_token_conf, num_samples=1)
                     # print(f"Position of end token: {current_block_start + position_of_end_token + 1}")
-                    x = x[:, :current_block_start + position_of_end_token + 1]
+                    x = x[:, :position_of_end_token + 1]
                 i += 1
 
                 if (x[:, current_block_start:current_block_end] == mask_token_id).sum() == 0:
