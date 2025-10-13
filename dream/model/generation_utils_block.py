@@ -35,26 +35,13 @@ from transformers.utils import (
 
 logger = logging.get_logger(__name__)
 
-def get_num_transfer_tokens(mask_index, steps):
-    '''
-    In the reverse process, the interval [0, 1] is uniformly discretized into steps intervals.
-    Furthermore, because LLaDA employs a linear noise schedule (as defined in Eq. (8)),
-    the expected number of tokens transitioned at each step should be consistent.
-
-    This function is designed to precompute the number of tokens that need to be transitioned at each step.
-    '''
-    mask_num = mask_index.sum(dim=1, keepdim=True)
-
-    base = mask_num // steps
-    remainder = mask_num % steps
-
-    num_transfer_tokens = torch.zeros(mask_num.size(0), steps, device=mask_index.device, dtype=torch.int64) + base
-
-    for i in range(mask_num.size(0)):
-        num_transfer_tokens[i, :remainder[i]] += 1
-
-    return num_transfer_tokens
-
+def get_transfer_index(confidence: torch.Tensor, number_transfer_tokens: int, alg_temp: float) -> torch.Tensor:
+    if alg_temp is None or alg_temp == 0:
+        return torch.topk(confidence, number_transfer_tokens)
+    else:
+        confidence = confidence / alg_temp
+        confidence = F.softmax(confidence, dim=-1)
+        return torch.multinomial(confidence, num_samples=number_transfer_tokens)
 
 def top_p_logits(logits, top_p=None):
     sorted_logits, sorted_indices = torch.sort(logits, descending=True)
@@ -446,13 +433,12 @@ class DreamGenerationMixin:
             current_block_start = input_ids.shape[1] + num_block * block_length
             current_block_end = current_block_start + block_length
             
-            index_of_interest = torch.full([x.shape[-1]], False, dtype=torch.bool, device=x.device)
             if "dual_cache" in method:
-                index_of_interest = slice(current_block_start, current_block_end)
+                no_cache_slice = slice(current_block_start, current_block_end)
             elif "prefix_cache" in method:
-                index_of_interest = slice(current_block_start, None)
+                no_cache_slice = slice(current_block_start, None)
             else:
-                index_of_interest = slice(None)
+                no_cache_slice = slice(None)
             
             # update cache
             if "cache" in method:
@@ -478,8 +464,7 @@ class DreamGenerationMixin:
             i = 1
             while True:
                 # Use cache for generation
-                mask_index = (x[:, index_of_interest] == mask_token_id)
-                
+                mask_index = (x[:, no_cache_slice] == mask_token_id)
                 if "dual_cache" in method:
                     mask_index[:, block_length:] = False
                 elif "prefix_cache" in method:
@@ -494,9 +479,9 @@ class DreamGenerationMixin:
                 else:
                     current_attention_mask = attention_mask
                 
-                model_output = self(x[:, index_of_interest],
+                model_output = self(x[:, no_cache_slice],
                                     current_attention_mask, 
-                                    tok_idx[:, index_of_interest] if tok_idx is not None else None, 
+                                    tok_idx[:, no_cache_slice] if tok_idx is not None else None, 
                                     past_key_values=past_key_values,
                                     use_cache=("cache" in method),
                                     dual_cache=("dual_cache" in method),
@@ -512,32 +497,22 @@ class DreamGenerationMixin:
                 confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
                 num_mask_token = mask_index.sum() / mask_index.shape[0]
                 number_transfer_tokens = int(num_mask_token * (1 - s / t)) if i < steps_per_block - 1 else int(num_mask_token)
-                full_confidence = torch.full_like(x[:, index_of_interest], -torch.inf, device=self.device, dtype=logits.dtype)
+                full_confidence = torch.full_like(x[:, no_cache_slice], -torch.inf, device=self.device, dtype=logits.dtype)
                 full_confidence[mask_index] = confidence
                 
                 if number_transfer_tokens > 0:
-                    if alg_temp is None or alg_temp == 0:
-                        _, transfer_index = torch.topk(full_confidence, number_transfer_tokens)
-                    else:
-                        full_confidence = full_confidence / alg_temp
-                        full_confidence = F.softmax(full_confidence, dim=-1)
-                        transfer_index = torch.multinomial(full_confidence, num_samples=number_transfer_tokens)
-                    x_ = torch.zeros_like(x[:, index_of_interest], device=self.device, dtype=torch.long) + mask_token_id
+                    transfer_index = get_transfer_index(full_confidence, number_transfer_tokens, alg_temp)
+                    x_ = torch.zeros_like(x[:, no_cache_slice], device=self.device, dtype=torch.long) + mask_token_id
                     x_[mask_index] = x0.clone()
                     row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
-                    x[:, index_of_interest][row_indices,transfer_index] = x_[row_indices,transfer_index]
+                    x[:, no_cache_slice][row_indices,transfer_index] = x_[row_indices,transfer_index]
                 
                 if "EoT" in method and (end_token_index := x0 == generation_config.eos_token_id).any():
                     # If the end token is present, we find its position and truncate the sequence.
                     # This is to ensure that the generation stops at the end token.
                     end_token_conf = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
-                    end_token_conf[:, index_of_interest][mask_index] = torch.where(end_token_index, confidence, -torch.inf)
-                    if alg_temp is None or alg_temp == 0:
-                        position_of_end_token = end_token_conf.argmax(dim=-1)
-                    else:
-                        end_token_conf = end_token_conf / alg_temp
-                        end_token_conf = F.softmax(end_token_conf, dim=-1)
-                        position_of_end_token = torch.multinomial(end_token_conf, num_samples=1)
+                    end_token_conf[:, no_cache_slice][mask_index] = torch.where(end_token_index, confidence, -torch.inf)
+                    position_of_end_token = get_transfer_index(end_token_conf, 1, alg_temp)
                     # print(f"Position of end token: {current_block_start + position_of_end_token + 1}")
                     x = x[:, :position_of_end_token + 1]
                     if "dual_cache" in method:

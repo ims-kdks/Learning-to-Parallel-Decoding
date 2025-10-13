@@ -80,7 +80,7 @@ output = model.diffusion_generate(
     alg_temp=0.1,
     top_k=None,
     block_length=32,
-    method="EoT"
+    method="EoT+prefix_cache"
     # generation_tokens_hook_func=generation_tokens_hook_func
 )
 print(f"Time spent: {time.time() - start}")
