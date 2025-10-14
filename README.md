@@ -6,6 +6,8 @@
 
 https://github.com/user-attachments/assets/09c67a58-b425-463d-a998-c1a6049bc171
 
+## 🔥News
+- [2025-10-14] [Dream](https://github.com/DreamLM/Dream) integration coming soon!
 
 ## How to run
 1. Install dependencies
