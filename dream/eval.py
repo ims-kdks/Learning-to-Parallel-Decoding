@@ -16,7 +16,6 @@
 # Modified from Dream repos: https://github.com/HKUNLP/Dream
 
 import logging
-import gc
 from datetime import timedelta
 from typing import List, Optional, Tuple, Type, TypeVar, Union
 import torch
@@ -38,11 +37,8 @@ from lm_eval.models.utils import get_dtype
 from lm_eval.__main__ import cli_evaluate
 from model.generation_utils_block import DreamGenerationMixin
 import types
-from model.configuration_dream import DreamConfig
 from model.modeling_dream import DreamModel
 import time
-import os
-import json
 
 eval_logger = logging.getLogger(__name__)
 T = TypeVar("T", bound="LM")
@@ -73,10 +69,9 @@ class Dream(LM):
         alg: Optional[str] = "entropy",
         alg_temp: Optional[float] = 0.0,
         escape_until: Optional[bool] = False,
-        threshold: Optional[float] = 0.9,
         apply_chat_template: Optional[bool] = False,
-        use_cache: Optional[bool] = False,
-        dual_cache: Optional[bool] = False,
+        block_length=32,
+        method="original",
         **kwargs,
     ) -> None:
         super().__init__()
@@ -198,7 +193,8 @@ class Dream(LM):
         self.alg = alg
         self.alg_temp = alg_temp
         self.escape_until = escape_until
-        self.threshold = threshold
+        self.block_length = block_length
+        self.method = method
         # loglikelihood params
         self.nll_type = nll_type
         self.log_type = log_type
@@ -206,8 +202,6 @@ class Dream(LM):
         self.classifier_free_guidance = classifier_free_guidance
         self.sampling_eps = sampling_eps
         self.if_apply_chat_template = apply_chat_template
-        self.use_cache = use_cache
-        self.dual_cache = dual_cache
         self.generated_token_num = 0
     @property
     def batch_size(self):
@@ -315,8 +309,8 @@ class Dream(LM):
             top_k=self.top_k,
             alg=self.alg,
             alg_temp=self.alg_temp,
-            threshold=self.threshold,
-            dual_cache=self.dual_cache,
+            block_length=self.block_length,
+            method=self.method
         )
 
         # decode
@@ -329,14 +323,6 @@ class Dream(LM):
 
     def generate_until(self, requests: List[Instance], disable_tqdm: bool = False):
         res = []
-        if self.use_cache:
-            from model.generation_utils_block import DreamGenerationMixin
-            self.model.diffusion_generate = types.MethodType(DreamGenerationMixin.diffusion_generate, self.model)
-            self.model._sample = types.MethodType(DreamGenerationMixin._sample, self.model)
-        else:
-            from model.generation_utils import DreamGenerationMixin
-            self.model.diffusion_generate = types.MethodType(DreamGenerationMixin.diffusion_generate, self.model)
-            self.model._sample = types.MethodType(DreamGenerationMixin._sample, self.model)
 
         processed_count = 0
 

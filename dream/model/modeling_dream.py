@@ -42,7 +42,7 @@ from transformers.utils import (
 )
 from transformers import PretrainedConfig
 from .configuration_dream import DreamConfig
-from .generation_utils import DreamGenerationMixin, DreamGenerationConfig
+from .generation_utils_block import DreamGenerationMixin, DreamGenerationConfig
 
 if is_flash_attn_2_available():
     from transformers.modeling_flash_attention_utils import _flash_attention_forward

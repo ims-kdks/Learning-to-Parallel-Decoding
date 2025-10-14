@@ -37,7 +37,8 @@ logger = logging.get_logger(__name__)
 
 def get_transfer_index(confidence: torch.Tensor, number_transfer_tokens: int, alg_temp: float) -> torch.Tensor:
     if alg_temp is None or alg_temp == 0:
-        return torch.topk(confidence, number_transfer_tokens)
+        _, transfer_index = torch.topk(confidence, number_transfer_tokens)
+        return transfer_index
     else:
         confidence = confidence / alg_temp
         confidence = F.softmax(confidence, dim=-1)
@@ -311,6 +312,7 @@ class DreamGenerationMixin:
     ) -> Union[DreamModelOutput, torch.LongTensor]:
         # 1. Handle `generation_config` and kwargs that might update it, and validate the `.generate()` call
         generation_config = self._prepare_generation_config(generation_config, **kwargs)
+        generation_tokens_hook_func = kwargs.pop("generation_tokens_hook_func", None)
 
         # 2. Define model inputs
         assert inputs is not None
@@ -364,6 +366,7 @@ class DreamGenerationMixin:
             input_ids,
             attention_mask=attention_mask,
             generation_config=generation_config,
+            generation_tokens_hook_func=generation_tokens_hook_func,
             block_length=block_length,
             method=method
         )
@@ -374,6 +377,7 @@ class DreamGenerationMixin:
         input_ids: torch.LongTensor,
         attention_mask: Optional[torch.LongTensor],
         generation_config: DreamGenerationConfig,
+        generation_tokens_hook_func: Optional[callable],
         block_length: Optional[int] = 32,
         method: str = "original"
     ) -> Union[DreamModelOutput, torch.LongTensor]:
@@ -462,7 +466,7 @@ class DreamGenerationMixin:
                     past_key_values = new_past_key_values
                 
             i = 1
-            while True:
+            while (x[:, current_block_start:current_block_end] == mask_token_id).any():
                 # Use cache for generation
                 mask_index = (x[:, no_cache_slice] == mask_token_id)
                 if "dual_cache" in method:
@@ -495,6 +499,10 @@ class DreamGenerationMixin:
                 s = timesteps[i + 1]
                 mask_logits = logits[mask_index]
                 confidence, x0 = sample_tokens(mask_logits, temperature, top_p=top_p, top_k=top_k, neg_entropy=True)
+                # this allows user-defined token control of the intermediate steps
+                if generation_tokens_hook_func:
+                    i, x, histories = generation_tokens_hook_func(i, x, x0, confidence, current_block_start, current_block_end, mask_index, histories)
+                    continue
                 num_mask_token = mask_index.sum() / mask_index.shape[0]
                 number_transfer_tokens = int(num_mask_token * (1 - s / t)) if i < steps_per_block - 1 else int(num_mask_token)
                 full_confidence = torch.full_like(x[:, no_cache_slice], -torch.inf, device=self.device, dtype=logits.dtype)
@@ -513,14 +521,11 @@ class DreamGenerationMixin:
                     end_token_conf = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
                     end_token_conf[:, no_cache_slice][mask_index] = torch.where(end_token_index, confidence, -torch.inf)
                     position_of_end_token = get_transfer_index(end_token_conf, 1, alg_temp)
-                    # print(f"Position of end token: {current_block_start + position_of_end_token + 1}")
+                    # print(f"Position of end token: {position_of_end_token + 1}")
                     x = x[:, :position_of_end_token + 1]
                     if "dual_cache" in method:
                         replace_position[:, position_of_end_token + 1:] = False
                 i += 1
-
-                if (x[:, current_block_start:current_block_end] == mask_token_id).sum() == 0:
-                    break
 
         
         if return_dict_in_generate:
