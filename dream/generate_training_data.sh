@@ -9,4 +9,5 @@ accelerate launch generate_training_data.py \
     --gen_length 256 \
     --block_length 32 \
     --split train \
-    --num_sample 40
+    --num_sample 40 \
+    > small_model_train/generate_training_data.log 2>&1

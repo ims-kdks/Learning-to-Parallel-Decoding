@@ -19,27 +19,19 @@ import torch
 from transformers import AutoModel, AutoTokenizer
 import time
 from model.modeling_dream import DreamModel
+from model.small_model import LogisticRegression
 
-import types
 # Load model and tokenizer
 device = "cuda:3"
-# 从命令行读取use_cache
-use_cache = True
 
-if use_cache:
-    model_path = "Dream-org/Dream-v0-Instruct-7B"
-    model = DreamModel.from_pretrained(model_path, dtype=torch.bfloat16, trust_remote_code=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    model = model.to(device).eval()
+model_path = "Dream-org/Dream-v0-Instruct-7B"
+model = DreamModel.from_pretrained(model_path, dtype=torch.bfloat16, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+model = model.to(device).eval()
 
-    from model.generation_utils_block import DreamGenerationMixin
-    model.diffusion_generate = types.MethodType(DreamGenerationMixin.diffusion_generate, model)
-    model._sample = types.MethodType(DreamGenerationMixin._sample, model)
-else:
-    model_path = "Dream-org/Dream-v0-Instruct-7B"
-    model = DreamModel.from_pretrained(model_path, dtype=torch.bfloat16, trust_remote_code=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    model = model.to(device).eval()
+small_model = LogisticRegression(32)
+small_model.load_state_dict(torch.load('small_model_train/layer_2_flan.pth'))
+small_model.to(device).eval()
 
 
 # Initialize conversation history
@@ -70,23 +62,23 @@ start = time.time()
 output = model.diffusion_generate(
     input_ids,
     attention_mask=attention_mask,
-    max_new_tokens=1024,
-    output_history=True,
-    return_dict_in_generate=True,
-    steps=1024,
+    max_new_tokens=256,
+    steps=256,
     temperature=0.,
     top_p=None,
     alg="entropy",
     alg_temp=0.1,
     top_k=None,
     block_length=32,
-    method="EoT+prefix_cache"
+    method="original",
+    # small_model=small_model,
+    # accept_thres=0.95,
     # generation_tokens_hook_func=generation_tokens_hook_func
 )
 print(f"Time spent: {time.time() - start}")
 
 # Process response
-generation = tokenizer.decode(output.sequences[0][len(input_ids[0]):].tolist())
+generation = tokenizer.decode(output.reshape(-1)[len(input_ids[0]):].tolist())
 generation = generation.split(tokenizer.eos_token)[0].strip()
 
 # Print response

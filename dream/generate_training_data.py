@@ -6,7 +6,6 @@ from tqdm import tqdm
 import argparse
 import pickle
 from model.modeling_dream import DreamModel
-from model.generation_utils_block import sample_tokens
 
 
 parser = argparse.ArgumentParser()
@@ -74,9 +73,9 @@ for i, elem in enumerate(tqdm(ds)):
     
     def generation_tokens_hook_func(step, x: torch.Tensor, x0: torch.Tensor, confidence: torch.Tensor, block_start, block_end, mask_index, histories):
         correct_block = correct_answer[:, block_start:block_end]
-        block_confidence = torch.zeros_like(x, dtype=confidence.dtype)
+        block_confidence = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
         block_confidence[mask_index] = confidence
-        block_confidence = block_confidence[:, block_start:block_end]
+        block_confidence = torch.sigmoid(block_confidence[:, block_start:block_end])
         block_token = x.clone()
         block_token[mask_index] = x0
         block_token = block_token[:, block_start:block_end]

@@ -6,3 +6,4 @@ math_verify
 sympy
 hf_xet
 polars
+matplotlib

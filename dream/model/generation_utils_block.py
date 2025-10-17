@@ -32,6 +32,7 @@ from transformers.utils import (
     is_torchdynamo_compiling,
     logging,
 )
+from .small_model import LogisticRegression
 
 logger = logging.get_logger(__name__)
 
@@ -361,6 +362,11 @@ class DreamGenerationMixin:
         )
         block_length = kwargs.get("block_length", 32)
         method = kwargs.get("method", "original")
+        small_model = kwargs.get("small_model", None)
+        accept_thres = kwargs.get("accept_thres", None)
+
+        if "L2P" in method:
+            assert small_model is not None and accept_thres is not None
 
         result = self._sample(
             input_ids,
@@ -368,6 +374,8 @@ class DreamGenerationMixin:
             generation_config=generation_config,
             generation_tokens_hook_func=generation_tokens_hook_func,
             block_length=block_length,
+            small_model=small_model,
+            accept_thres=accept_thres,
             method=method
         )
         return result
@@ -379,6 +387,8 @@ class DreamGenerationMixin:
         generation_config: DreamGenerationConfig,
         generation_tokens_hook_func: Optional[callable],
         block_length: Optional[int] = 32,
+        small_model: Optional[LogisticRegression] = None,
+        accept_thres: Optional[float] = None,
         method: str = "original"
     ) -> Union[DreamModelOutput, torch.LongTensor]:
         # init values
@@ -509,18 +519,47 @@ class DreamGenerationMixin:
                 full_confidence[mask_index] = confidence
                 
                 if number_transfer_tokens > 0:
-                    transfer_index = get_transfer_index(full_confidence, number_transfer_tokens, alg_temp)
-                    x_ = torch.zeros_like(x[:, no_cache_slice], device=self.device, dtype=torch.long) + mask_token_id
-                    x_[mask_index] = x0.clone()
-                    row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
-                    x[:, no_cache_slice][row_indices,transfer_index] = x_[row_indices,transfer_index]
+                    if "L2P" in method:
+                        block_confidence = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
+                        block_confidence[:, no_cache_slice][mask_index] = confidence
+                        block_confidence = torch.sigmoid(block_confidence[:, current_block_start:current_block_end])
+                        
+                        block_logists = small_model(block_confidence.to(dtype=torch.float32))
+                        accept_mask = (torch.sigmoid(block_logists) > accept_thres)
+                        x_ = torch.full_like(x, mask_token_id)
+                        x_[:, no_cache_slice][mask_index] = x0.clone()
+                        if (transfer_mask := accept_mask & (x_[:, current_block_start:current_block_end] != mask_token_id)).any():
+                            x[:, current_block_start:current_block_end] = torch.where(
+                                    transfer_mask,
+                                    x_[:, current_block_start:current_block_end],
+                                    x[:, current_block_start:current_block_end]
+                                )
+                        else:
+                            # fallback to original method
+                            transfer_index = get_transfer_index(full_confidence, number_transfer_tokens, alg_temp)
+                            x_ = torch.zeros_like(x[:, no_cache_slice], device=self.device, dtype=torch.long) + mask_token_id
+                            x_[mask_index] = x0.clone()
+                            row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
+                            x[:, no_cache_slice][row_indices,transfer_index] = x_[row_indices,transfer_index]
+                    else:
+                        transfer_index = get_transfer_index(full_confidence, number_transfer_tokens, alg_temp)
+                        x_ = torch.zeros_like(x[:, no_cache_slice], device=self.device, dtype=torch.long) + mask_token_id
+                        x_[mask_index] = x0.clone()
+                        row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
+                        x[:, no_cache_slice][row_indices,transfer_index] = x_[row_indices,transfer_index]
                 
-                if "EoT" in method and (end_token_index := x0 == generation_config.eos_token_id).any():
-                    # If the end token is present, we find its position and truncate the sequence.
-                    # This is to ensure that the generation stops at the end token.
-                    end_token_conf = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
-                    end_token_conf[:, no_cache_slice][mask_index] = torch.where(end_token_index, confidence, -torch.inf)
-                    position_of_end_token = get_transfer_index(end_token_conf, 1, alg_temp)
+                if "EoT" in method:
+                    position_of_end_token = x.shape[-1]
+                    
+                    if (end_token_index := x == generation_config.eos_token_id).any():
+                        position_of_end_token = end_token_index.nonzero()[0][-1]
+                    elif (end_token_index := x0 == generation_config.eos_token_id).any():
+                        # If the end token is present, we find its position and truncate the sequence.
+                        # This is to ensure that the generation stops at the end token.
+                        end_token_conf = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
+                        end_token_conf[:, no_cache_slice][mask_index] = torch.where(end_token_index, confidence, -torch.inf)
+                        position_of_end_token = get_transfer_index(end_token_conf, 1, alg_temp)
+                    
                     # print(f"Position of end token: {position_of_end_token + 1}")
                     x = x[:, :position_of_end_token + 1]
                     if "dual_cache" in method:
