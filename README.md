@@ -17,7 +17,7 @@ Extremely Greedy Parallel strategy: compares the predicted tokens with the refer
 Use a trained filter $f_\theta$ that simulate the Extremely Greedy Parallel strategy after each decoding step to select tokens and decide whether to remask them.
 
 ### 2. End-of-Text Prediction
-<img width="595" height="502" alt="eot" src="https://github.com/user-attachments/assets/ec85eba5-6bab-44e2-82cd-51c5431674d8" />
+<img width="350" height="295" alt="eot" src="https://github.com/user-attachments/assets/ec85eba5-6bab-44e2-82cd-51c5431674d8" />
 
 Upon detection of an $[EoT]$ token, we throw away all the tokens after the $[EoT]$ token in the next diffusion step. When the specified output length is very long (for example, 1024), this method can significantly reduce computation by dynamically reducing the input size during the diffusion process.
 
