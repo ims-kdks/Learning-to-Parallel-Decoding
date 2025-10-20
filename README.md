@@ -17,13 +17,15 @@ Extremely Greedy Parallel strategy: compares the predicted tokens with the refer
 Use a trained filter $f_\theta$ that simulate the Extremely Greedy Parallel strategy after each decoding step to select tokens and decide whether to remask them.
 
 ### 2. End-of-Text Prediction
-<img width="350" height="295" alt="eot" src="https://github.com/user-attachments/assets/ec85eba5-6bab-44e2-82cd-51c5431674d8" />
+<img width="35%" alt="eot" src="https://github.com/user-attachments/assets/ec85eba5-6bab-44e2-82cd-51c5431674d8" />
 
 Upon detection of an $[EoT]$ token, we throw away all the tokens after the $[EoT]$ token in the next diffusion step. When the specified output length is very long (for example, 1024), this method can significantly reduce computation by dynamically reducing the input size during the diffusion process.
 
 ## 🏎️Performance
 Experiments on **GSM8K**, **MATH**, **HumanEval**, and **MBPP** show that our approach significantly improves throughput (by **up to 22.58 times faster**) while maintaining model accuracy, demonstrating outstanding generalization and practicality. Each method was evaluated using two generation lengths (256 and 1024) across four datasets. Performance is measured using three metrics: TPS (tokens/sec), speedup, and accuracy score. The highest throughput and speedup values for each configuration are highlighted in bold.
-<img width="972" height="834" alt="performance" src="https://github.com/user-attachments/assets/529e3272-4714-4299-9a4e-ed0674d72b89" />
+<p align="center">
+   <img width="70%" alt="performance" src="https://github.com/user-attachments/assets/529e3272-4714-4299-9a4e-ed0674d72b89" />
+</p>
 
 ## How to run
 1. Install dependencies
