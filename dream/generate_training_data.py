@@ -6,6 +6,9 @@ from tqdm import tqdm
 import argparse
 import pickle
 from model.modeling_dream import DreamModel
+# prevent crash due to waiting for other processes for more than 10 minutes
+import datetime
+torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(hours=2))
 
 
 parser = argparse.ArgumentParser()
@@ -54,7 +57,7 @@ ds = ds.map(_tokenize).with_format('torch', device=device)
 
 
 # generate data for training
-for i, elem in enumerate(tqdm(ds)):
+for i, elem in enumerate(tqdm(ds, desc=f'[GPU{accelerator.process_index}]')):
     prompt = elem['question'].to(device)
     attention_mask = elem['attention_mask'].to(device)
     # get the correct answer first
@@ -63,22 +66,21 @@ for i, elem in enumerate(tqdm(ds)):
         attention_mask=attention_mask,
         max_new_tokens=args.gen_length,
         steps=args.steps,
-        temperature=0.,
-        top_p=None,
         alg="entropy",
-        alg_temp=0.1,
-        top_k=None,
         block_length=args.block_length,
     )
     
     def generation_tokens_hook_func(step, x: torch.Tensor, x0: torch.Tensor, confidence: torch.Tensor, block_start, block_end, mask_index, histories):
         correct_block = correct_answer[:, block_start:block_end]
-        block_confidence = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
+        
+        block_confidence = torch.zeros_like(x, dtype=confidence.dtype)
         block_confidence[mask_index] = confidence
-        block_confidence = torch.sigmoid(block_confidence[:, block_start:block_end])
+        block_confidence = block_confidence[:, block_start:block_end]
+        
         block_token = x.clone()
         block_token[mask_index] = x0
         block_token = block_token[:, block_start:block_end]
+        
         is_correct = (block_token == correct_block)
         histories.append({
             'step': step,
@@ -100,11 +102,7 @@ for i, elem in enumerate(tqdm(ds)):
         output_history=True,
         return_dict_in_generate=True,
         steps=args.steps,
-        temperature=0.,
-        top_p=None,
         alg="entropy",
-        alg_temp=0.1,
-        top_k=None,
         block_length=args.block_length,
         generation_tokens_hook_func=generation_tokens_hook_func
     )

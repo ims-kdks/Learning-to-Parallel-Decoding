@@ -38,6 +38,7 @@ from lm_eval.__main__ import cli_evaluate
 from model.generation_utils_block import DreamGenerationMixin
 import types
 from model.modeling_dream import DreamModel
+from model.small_model import LogisticRegression
 import time
 
 eval_logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class Dream(LM):
         apply_chat_template: Optional[bool] = False,
         block_length=32,
         method="original",
+        accept_thres=None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -133,6 +135,10 @@ class Dream(LM):
             self.batch_size_per_gpu = int(batch_size)
         self._create_model_and_tokenizer(pretrained, dtype, trust_remote_code)
 
+        self.small_model = LogisticRegression(32)
+        self.small_model.load_state_dict(torch.load('small_model_train/layer_2_flan.pth'))
+        self.small_model.to(self.device).eval()
+
         if isinstance(pretrained, str):
             if gpus >= 1 or str(self.device) == "mps":
                 # TODO: can remove this whole snippet except in the mps case, perhaps?
@@ -142,6 +148,7 @@ class Dream(LM):
                     # or any other option that preloads model onto device
                     try:
                         self.model.to(self.device)
+                        self.small_model.to(self.device)
                     except ValueError:
                         eval_logger.debug(
                             "Failed to place model onto specified device. This may be because the model is quantized via `bitsandbytes` or `device_map` is provided. If the desired GPU is being used, this message is safe to ignore."
@@ -195,6 +202,7 @@ class Dream(LM):
         self.escape_until = escape_until
         self.block_length = block_length
         self.method = method
+        self.accept_thres = accept_thres
         # loglikelihood params
         self.nll_type = nll_type
         self.log_type = log_type
@@ -310,7 +318,9 @@ class Dream(LM):
             alg=self.alg,
             alg_temp=self.alg_temp,
             block_length=self.block_length,
-            method=self.method
+            method=self.method,
+            small_model=self.small_model,
+            accept_thres=self.accept_thres
         )
 
         # decode
@@ -356,17 +366,22 @@ class Dream(LM):
         end_time = time.perf_counter()
         elapsed = end_time - start_time
         
-        print(f"[GPU{self.accelerator.process_index}] Number of tokens: {self.generated_token_num}")
-        print(f"[GPU{self.accelerator.process_index}] Generation time: {elapsed} seconds")
-        print(f"[GPU{self.accelerator.process_index}] Tokens per second: {self.generated_token_num / elapsed}")
+        if hasattr(self, "accelerator"):
+            print(f"[GPU{self.accelerator.process_index}] Number of tokens: {self.generated_token_num}")
+            print(f"[GPU{self.accelerator.process_index}] Generation time: {elapsed} seconds")
+            print(f"[GPU{self.accelerator.process_index}] Tokens per second: {self.generated_token_num / elapsed}")
 
-        self.accelerator.wait_for_everyone()
-        total_elapsed = self.accelerator.reduce(torch.tensor(elapsed, device=self.accelerator.device), reduction="sum").item()
-        total_num_tokens = self.accelerator.reduce(torch.tensor(self.generated_token_num, device=self.accelerator.device), reduction="sum").item()
-        if self.accelerator.is_main_process:
-            print(f"Number of tokens: {total_num_tokens}")
-            print(f"Generation time: {total_elapsed} seconds")
-            print(f"Tokens per second: {total_num_tokens / total_elapsed}")
+            self.accelerator.wait_for_everyone()
+            total_elapsed = self.accelerator.reduce(torch.tensor(elapsed, device=self.accelerator.device), reduction="sum").item()
+            total_num_tokens = self.accelerator.reduce(torch.tensor(self.generated_token_num, device=self.accelerator.device), reduction="sum").item()
+            if self.accelerator.is_main_process:
+                print(f"Number of tokens: {total_num_tokens}")
+                print(f"Generation time: {total_elapsed} seconds")
+                print(f"Tokens per second: {total_num_tokens / total_elapsed}")
+        else:
+            print(f"Number of tokens: {self.generated_token_num}")
+            print(f"Generation time: {elapsed} seconds")
+            print(f"Tokens per second: {self.generated_token_num / elapsed}")
         return res
 
     def _forward_process(self, batch):

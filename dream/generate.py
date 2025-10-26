@@ -38,6 +38,7 @@ small_model.to(device).eval()
 messages = []
 
 # Get user input
+# user_input = "Brandon's iPhone is four times as old as Ben's iPhone. Ben's iPhone is two times older than Suzy's iPhone. If Suzy’s iPhone is 1 year old, how old is Brandon’s iPhone?"
 user_input = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?"
 
 # Add user message to conversation history
