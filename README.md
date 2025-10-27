@@ -42,6 +42,8 @@ pip install -r requirements.txt
    ./eval_llada.sh
    ```
 ## Generate data for training
+1. Download the [FLAN](https://huggingface.co/datasets/Muennighoff/flan) dataset to `small_model_train/flan`
+2. Run the following script
 ```
 ./generate_training_data.sh
 ```
