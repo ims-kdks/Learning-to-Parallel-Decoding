@@ -555,7 +555,7 @@ def main():
 
     small_model = LogisticRegression(32)
     small_model.load_state_dict(torch.load('small_model_train/layer_2_flan.pth'))
-    small_model.to(device)
+    small_model.to(device).eval()
 
     model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True)
