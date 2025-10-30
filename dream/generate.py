@@ -51,13 +51,6 @@ inputs = tokenizer.apply_chat_template(
 input_ids = inputs.input_ids.to(device=device)
 attention_mask = inputs.attention_mask.to(device=device)
 
-def generation_tokens_hook_func(step, x, logits):
-    print(f"############ Step {step} ############")
-    # print(tokenizer.decode(h[0].tolist()))
-    print(tokenizer.decode(x[0].tolist()).split(tokenizer.eos_token)[0].replace(tokenizer.mask_token, " "), end="\r")
-    time.sleep(0.01)
-    return x
-
 # Generate response
 start = time.time()
 output = model.diffusion_generate(
@@ -74,7 +67,6 @@ output = model.diffusion_generate(
     method="original",
     # small_model=small_model,
     # accept_thres=0.95,
-    # generation_tokens_hook_func=generation_tokens_hook_func
 )
 print(f"Time spent: {time.time() - start}")
 
