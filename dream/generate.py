@@ -30,7 +30,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 model = model.to(device).eval()
 
 small_model = LogisticRegression(32)
-small_model.load_state_dict(torch.load('small_model_train/layer_2_flan.pth'))
+small_model.load_state_dict(torch.load('layer_2_flan.pth'))
 small_model.to(device).eval()
 
 

@@ -136,7 +136,7 @@ class Dream(LM):
         self._create_model_and_tokenizer(pretrained, dtype, trust_remote_code)
 
         self.small_model = LogisticRegression(32)
-        self.small_model.load_state_dict(torch.load('small_model_train/layer_2_flan.pth'))
+        self.small_model.load_state_dict(torch.load('layer_2_flan.pth'))
         self.small_model.to(self.device).eval()
 
         if isinstance(pretrained, str):

@@ -9,6 +9,7 @@ import accelerate
 from tqdm import tqdm
 import argparse
 import pickle
+import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--num_sample", type=int, required=False, help="Number of samples to be selected from each task")
@@ -18,6 +19,10 @@ parser.add_argument("--block_length", type=int, required=True)
 parser.add_argument("--split", type=str, required=True)
 args = parser.parse_args()
 print(args)
+
+# create folder to store data for training
+train_data_dir = "small_model_train/train_data"
+os.makedirs(train_data_dir, exist_ok=True)
 
 def get_subset(ds: Dataset):
     '''
@@ -129,7 +134,7 @@ def generate_data(model: LLaDAModelLM, prompt, steps=128, gen_length=128, block_
             i += 1
     
     # save data
-    with open(f"small_model_train/train_data/{id}.pkl", "wb") as file:
+    with open(f"{train_data_dir}/{id}.pkl", "wb") as file:
         pickle.dump(results, file)
 
     return x
@@ -138,8 +143,8 @@ def generate_data(model: LLaDAModelLM, prompt, steps=128, gen_length=128, block_
 accelerator = accelerate.Accelerator()
 
 # prepar model
-model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16, device_map=f'{accelerator.device}').eval()
-# model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16, device_map='auto').eval()
+model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, dtype=torch.bfloat16, device_map=f'{accelerator.device}').eval()
+# model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, dtype=torch.bfloat16, device_map='auto').eval()
 model = accelerator.prepare(model)
 device = torch.device(f'{accelerator.device}')
 

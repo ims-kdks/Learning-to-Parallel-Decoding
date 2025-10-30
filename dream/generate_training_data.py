@@ -1,4 +1,5 @@
 import torch
+import os
 from transformers import AutoTokenizer
 from datasets import load_dataset, Dataset
 import accelerate
@@ -19,6 +20,10 @@ parser.add_argument("--block_length", type=int, required=True)
 parser.add_argument("--split", type=str, required=True)
 args = parser.parse_args()
 print(args)
+
+# create folder to store data for training
+train_data_dir = "small_model_train/train_data"
+os.makedirs(train_data_dir, exist_ok=True)
 
 def get_subset(ds: Dataset):
     '''
@@ -107,5 +112,5 @@ for i, elem in enumerate(tqdm(ds, desc=f'[GPU{accelerator.process_index}]')):
         generation_tokens_hook_func=generation_tokens_hook_func
     )
     
-    with open(f"small_model_train/train_data/{accelerator.process_index}-{i}.pkl", 'wb') as file:
+    with open(f"{train_data_dir}/{accelerator.process_index}-{i}.pkl", 'wb') as file:
         pickle.dump(output.history, file)

@@ -551,13 +551,13 @@ def get_transfer_index(logits, temperature, remasking, mask_index, x, num_transf
 
 
 def main():
-    device = 'cuda'
+    device = 'cuda:0'
 
     small_model = LogisticRegression(32)
-    small_model.load_state_dict(torch.load('small_model_train/layer_2_flan.pth'))
+    small_model.load_state_dict(torch.load('layer_2_flan.pth'))
     small_model.to(device).eval()
 
-    model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16).to(device).eval()
+    model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, dtype=torch.bfloat16).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True)
 
     prompt = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours? Give me the number only"

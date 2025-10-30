@@ -83,12 +83,12 @@ class LLaDAEvalHarness(LM):
         if self.accelerator is not None:
             model_kwargs.update({'device_map': {'': f'{self.accelerator.device}'}})
 
-        small_model_path='small_model_train/layer_2_flan.pth'
+        small_model_path='layer_2_flan.pth'
         self.small_model = LogisticRegression(32)
         self.small_model.load_state_dict(torch.load(small_model_path))
         self.small_model.eval()
 
-        self.model = LLaDAModelLM.from_pretrained(model_path, torch_dtype=torch.bfloat16, **model_kwargs)
+        self.model = LLaDAModelLM.from_pretrained(model_path, dtype=torch.bfloat16, **model_kwargs)
         self.model.eval()
 
         self.device = torch.device(device)
