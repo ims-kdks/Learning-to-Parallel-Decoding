@@ -544,19 +544,10 @@ class DreamGenerationMixin:
                     row_indices = torch.arange(x.size(0), device=self.device).unsqueeze(1).expand_as(transfer_index)
                     x[:, no_cache_slice][row_indices,transfer_index] = x_[row_indices,transfer_index]
                 
-                if "EoT" in method:
-                    position_of_end_token = x.shape[-1]
-                    
+                if "EoT" in method:                    
                     if (end_token_index := x == generation_config.eos_token_id).any():
                         position_of_end_token = end_token_index.nonzero()[0][-1]
-                    # elif (end_token_index := x0 == generation_config.eos_token_id).any():
-                    #     # If the end token is present, we find its position and truncate the sequence.
-                    #     # This is to ensure that the generation stops at the end token.
-                    #     end_token_conf = torch.full_like(x, -torch.inf, dtype=confidence.dtype)
-                    #     end_token_conf[:, no_cache_slice][mask_index] = torch.where(end_token_index, confidence, -torch.inf)
-                    #     position_of_end_token = get_transfer_index(end_token_conf, 1, alg_temp)
-                    
-                    # print(f"Position of end token: {position_of_end_token + 1}")
+                        # print(f"Position of end token: {position_of_end_token + 1}")
                         x = x[:, :position_of_end_token + 1]
                         if "dual_cache" in method:
                             replace_position[:, position_of_end_token + 1:] = False
