@@ -7,6 +7,7 @@
 https://github.com/user-attachments/assets/09c67a58-b425-463d-a998-c1a6049bc171
 
 ## 🔥News
+- [2026-01-26]: Our paper is accept by ICLR 2026.
 - [2025-10-14] [Dream](https://github.com/DreamLM/Dream) integration coming soon!
 
 ## 💡Methods
